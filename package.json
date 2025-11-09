@@ -1,0 +1,21 @@
+{
+  "name": "queuectl",
+  "version": "1.0.0",
+  "description": "CLI-based background job queue system with retries and DLQ (JSON storage)",
+  "main": "src/cli.js",
+  "bin": {
+    "queuectl": "./bin/queuectl"
+  },
+  "scripts": {
+    "start": "node ./bin/queuectl",
+    "test": "echo \"add tests here\""
+  },
+  "dependencies": {
+    "commander": "^12.0.0",
+    "uuid": "^9.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "MIT"
+}
