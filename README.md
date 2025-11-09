@@ -1,6 +1,10 @@
 # queuectl
 
-A minimal, production-flavoured **CLI-based background job queue system**.
+**A CLI-based background job queue system**.
+
+## Demo Link
+
+https://drive.google.com/file/d/1mOJkz5KrFhM2d8nLvoeqVdWfhAxIC7xb/view?usp=sharing
 
 `queuectl` lets you:
 
