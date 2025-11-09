@@ -1,4 +1,3 @@
-// src/configRepository.js
 const { withDataLocked, readData } = require("./db");
 
 function getConfig(key, defaultValue = null) {

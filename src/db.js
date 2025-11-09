@@ -1,4 +1,3 @@
-// src/db.js
 const fs = require("fs");
 const path = require("path");
 const { nowMs } = require("./utils");

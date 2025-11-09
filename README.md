@@ -28,7 +28,7 @@ Designed to match the assignment requirements while keeping the code small, read
 ✅ Basic status & listing commands  
 ✅ Clear separation of concerns
 
-> Note: Storage is implemented using a lock-protected JSON file instead of SQLite for portability and zero native build issues. This still meets the “persistent job storage” requirement.
+> Note: Storage is implemented using a lock-protected JSON file instead of SQLite for portability and zero native build issues. This still meets the "persistent job storage" requirement.
 
 ---
 
@@ -71,381 +71,398 @@ npm link        # optional; installs `queuectl` as a local global command
 
 ### Enqueue a Job
 
-## Add a job by passing a JSON payload (must include command):
+Add a job by passing a JSON payload (must include command):
 
 ```bash
 queuectl enqueue '{"command":"echo Hello from queue"}'
 ```
 
-## Optional fields:
+#### Optional fields:
 
-id — custom job id (otherwise a UUID is generated)
+- `id` — custom job id (otherwise a UUID is generated)
+- `max_retries` — override default retry count for this job
 
-max_retries — override default retry count for this job
+**Example:**
 
-Example:
-
+```bash
 queuectl enqueue '{"id":"job-1","command":"echo hi","max_retries":5}'
+```
 
 This creates a job with:
 
-state = "pending"
+- `state = "pending"`
+- `attempts = 0`
+- `run_at = now`
 
-attempts = 0
-
-run_at = now
-
-Start Workers
+### Start Workers
 
 Start one or more workers to process jobs:
 
+```bash
 queuectl worker:start --count 3
+```
 
-Behavior:
+**Behavior:**
 
 Each worker:
 
-polls for jobs in pending / eligible failed state
-
-atomically claims one job and marks it processing
-
-executes the job’s command using the system shell
-
-updates job to completed, failed, or dead
+- polls for jobs in pending / eligible failed state
+- atomically claims one job and marks it processing
+- executes the job's command using the system shell
+- updates job to completed, failed, or dead
 
 Workers keep running, waiting for new jobs.
 
-Stop workers gracefully:
+#### Stop workers gracefully:
 
-In the same terminal: Ctrl + C
+- In the same terminal: **Ctrl + C**
 
 Or from another terminal:
 
+```bash
 queuectl worker:stop
+```
 
 Workers finish their current job before exiting.
 
-Check Status
+### Check Status
 
 Show counts of jobs in each state:
 
+```bash
 queuectl status
+```
 
-Example:
+**Example:**
 
+```
 Job Status:
 pending 1
 processing 0
 completed 3
 failed 0
 dead 1
+```
 
-List Jobs
+### List Jobs
 
 List all jobs:
 
+```bash
 queuectl list
+```
 
-Filter by state:
+#### Filter by state:
 
+```bash
 queuectl list --state pending
 queuectl list --state completed
 queuectl list --state dead
+```
 
-Inspect a single job:
+#### Inspect a single job:
 
+```bash
 queuectl show <job-id>
+```
 
-Dead Letter Queue (DLQ)
+### Dead Letter Queue (DLQ)
 
 Jobs that exceed max_retries are marked dead and form the DLQ.
 
-List DLQ jobs:
+#### List DLQ jobs:
 
+```bash
 queuectl dlq:list
+```
 
-Retry a DLQ job:
+#### Retry a DLQ job:
 
+```bash
 queuectl dlq:retry <job-id>
+```
 
 This moves the job to:
 
-state = "pending"
-
-attempts = 0
-
-run_at = now
+- `state = "pending"`
+- `attempts = 0`
+- `run_at = now`
 
 Workers will then pick it up again.
 
-Configuration
+### Configuration
 
 Configuration is stored inside queue.json under config and controlled via:
 
+```bash
 queuectl config get <key>
 queuectl config set <key> <value>
+```
 
-Supported keys:
+#### Supported keys:
 
-max_retries — default maximum retries per job (if job doesn’t override)
+- `max_retries` — default maximum retries per job (if job doesn't override)
+- `backoff_base` — base for exponential backoff
+- `(internal) workers_stop` — used to signal workers to stop
 
-backoff_base — base for exponential backoff
+#### Examples:
 
-(internal) workers_stop — used to signal workers to stop
-
-Examples:
-
+```bash
 queuectl config set max_retries 3
 queuectl config set backoff_base 2
 queuectl config get max_retries
+```
 
 If a job includes its own max_retries, that value is used instead of the global one.
 
-Architecture Overview
-Job Model
+## Architecture Overview
+
+### Job Model
 
 Each job in queue.json looks like:
 
+```json
 {
-"id": "uuid-or-custom",
-"command": "echo 'Hello'",
-"state": "pending | processing | completed | failed | dead",
-"attempts": 0,
-"max_retries": 3,
-"run_at": 1730899200000,
-"created_at": 1730899200000,
-"updated_at": 1730899200000,
-"last_error": null
+  "id": "uuid-or-custom",
+  "command": "echo 'Hello'",
+  "state": "pending | processing | completed | failed | dead",
+  "attempts": 0,
+  "max_retries": 3,
+  "run_at": 1730899200000,
+  "created_at": 1730899200000,
+  "updated_at": 1730899200000,
+  "last_error": null
 }
+```
 
-Lifecycle
+### Lifecycle
 
-Enqueue
+#### Enqueue
 
-state = "pending", attempts = 0, run_at = now.
+- `state = "pending"`, `attempts = 0`, `run_at = now`.
 
-Worker Claim
+#### Worker Claim
 
 Under a file lock, a worker:
 
-finds the oldest eligible job (pending / failed with run_at <= now)
+- finds the oldest eligible job (pending / failed with run_at <= now)
+- marks it processing
+- returns it to execute.
 
-marks it processing
-
-returns it to execute.
-
-Execute
+#### Execute
 
 Command is run using child_process.spawn with shell: true.
 
-On Success
+#### On Success
 
-state = "completed"
+- `state = "completed"`
+- `last_error = null`
 
-last_error = null
+#### On Failure
 
-On Failure
-
-attempts++
+- `attempts++`
 
 If attempts > max_retries:
 
-state = "dead"
-
-job is visible in DLQ.
+- `state = "dead"`
+- job is visible in DLQ.
 
 Else:
 
-state = "failed"
+- `state = "failed"`
+- `run_at = now + backoff_delay`
+- `last_error` recorded
 
-run_at = now + backoff_delay
+#### DLQ Retry
 
-last_error recorded
+`dlq:retry`:
 
-DLQ Retry
+- `state = "pending"`
+- `attempts = 0`
+- `run_at = now`
+- clears `last_error`
 
-dlq:retry:
-
-state = "pending"
-
-attempts = 0
-
-run_at = now
-
-clears last_error
-
-Exponential Backoff
+### Exponential Backoff
 
 For failure attempt n (1-based), using backoff_base = b:
 
-delay_seconds = b ^ n
+- `delay_seconds = b ^ n`
 
-Example with b = 2:
+**Example with b = 2:**
 
-1st failure → 2s
-
-2nd failure → 4s
-
-3rd failure → 8s
+- 1st failure → 2s
+- 2nd failure → 4s
+- 3rd failure → 8s
 
 then DLQ once attempts > max_retries
 
-Persistence & Locking
+### Persistence & Locking
 
 All state is stored in queue.json:
 
-jobs: all jobs
-
-config: global settings
+- `jobs`: all jobs
+- `config`: global settings
 
 Writes go through a simple lock file queue.json.lock via withDataLocked:
 
-prevents concurrent write corruption
-
-suitable for a single-node CLI + worker model
+- prevents concurrent write corruption
+- suitable for a single-node CLI + worker model
 
 On worker startup only:
 
-any processing jobs left over from a crash are recovered back to pending
+- any processing jobs left over from a crash are recovered back to pending
+- ensures no job is stuck indefinitely in processing.
 
-ensures no job is stuck indefinitely in processing.
-
-Worker Concurrency & Safety
+### Worker Concurrency & Safety
 
 Multiple workers share the same storage.
 
-fetchAndMarkNextJob:
+`fetchAndMarkNextJob`:
 
-runs under lock
-
-picks exactly one job
-
-marks it processing before returning.
+- runs under lock
+- picks exactly one job
+- marks it processing before returning.
 
 This ensures:
 
-no duplicate execution
+- no duplicate execution
+- at-most-once semantics for each job in this single-node design.
 
-at-most-once semantics for each job in this single-node design.
+### Graceful Shutdown
 
-Graceful Shutdown
+Ctrl + C in worker process or `queuectl worker:stop`:
 
-Ctrl + C in worker process or queuectl worker:stop:
-
-sets a stop flag (workers_stop).
+- sets a stop flag (workers_stop).
 
 workers:
 
-finish current job
+- finish current job
+- stop polling
+- exit cleanly.
 
-stop polling
+## Testing Instructions
 
-exit cleanly.
+These manual tests demonstrate correctness and match the assignment's scenarios.
 
-Testing Instructions
+### 1. Basic Success
 
-These manual tests demonstrate correctness and match the assignment’s scenarios.
+```bash
+queuectl enqueue '{"command":"echo ok"}'
+queuectl worker:start --count 1
+```
 
-1. Basic Success
-   queuectl enqueue '{"command":"echo ok"}'
-   queuectl worker:start --count 1
+**Expect:** job transitions pending → processing → completed.
 
-Expect: job transitions pending → processing → completed.
-Check:
+**Check:**
 
+```bash
 queuectl status
+```
 
-2. Automatic Retries + DLQ
-   queuectl config set max_retries 2
-   queuectl config set backoff_base 2
-   queuectl enqueue '{"command":"powershell -Command \"exit 1\""}'
-   queuectl worker:start --count 1
+### 2. Automatic Retries + DLQ
 
-Expect:
+```bash
+queuectl config set max_retries 2
+queuectl config set backoff_base 2
+queuectl enqueue '{"command":"powershell -Command \"exit 1\""}'
+queuectl worker:start --count 1
+```
 
-Worker logs multiple failures.
+**Expect:**
 
-After retries, job state = "dead".
+- Worker logs multiple failures.
+- After retries, job state = "dead".
+- Visible via:
 
-Visible via:
-
+```bash
 queuectl dlq:list
+```
 
-3. DLQ Retry
-   queuectl dlq:list # note a dead job id
-   queuectl dlq:retry <id>
-   queuectl show <id> # state = pending, attempts = 0
-   queuectl worker:start --count 1
+### 3. DLQ Retry
 
-Expect: job is re-attempted according to retry rules.
+```bash
+queuectl dlq:list # note a dead job id
+queuectl dlq:retry <id>
+queuectl show <id> # state = pending, attempts = 0
+queuectl worker:start --count 1
+```
 
-4. Multiple Workers, No Duplicates
-   for i in $(seq 1 10); do
+**Expect:** job is re-attempted according to retry rules.
+
+### 4. Multiple Workers, No Duplicates
+
+```bash
+for i in $(seq 1 10); do
   queuectl enqueue "{\"command\":\"echo job-$i\"}";
-   done
+done
 
 queuectl worker:start --count 3
+```
 
-Expect:
+**Expect:**
 
-All 10 jobs end up completed.
+- All 10 jobs end up completed.
+- No job is picked twice in logs.
+- `queuectl status` → completed = 10, no unexpected failed/dead.
 
-No job is picked twice in logs.
+### 5. Invalid Command Handling
 
-queuectl status → completed = 10, no unexpected failed/dead.
+```bash
+queuectl enqueue '{"command":"this_command_does_not_exist_123"}'
+queuectl worker:start --count 1
+```
 
-5. Invalid Command Handling
-   queuectl enqueue '{"command":"this_command_does_not_exist_123"}'
-   queuectl worker:start --count 1
+**Expect:**
 
-Expect:
+- Worker logs failure.
+- Job is retried up to max_retries.
+- Ends in dead (visible in DLQ).
+- No crash of the worker or CLI.
 
-Worker logs failure.
+### 6. Invalid Input Handling
 
-Job is retried up to max_retries.
+```bash
+queuectl enqueue 'not-json'
+```
 
-Ends in dead (visible in DLQ).
+**Expect:**
 
-No crash of the worker or CLI.
+- Clear error message.
+- No job created.
 
-6. Invalid Input Handling
-   queuectl enqueue 'not-json'
+### 7. Crash Recovery
 
-Expect:
-
-Clear error message.
-
-No job created.
-
-7. Crash Recovery
-   queuectl enqueue '{"id":"crash-test","command":"powershell -Command \"Start-Sleep -Seconds 20\""}'
-   queuectl worker:start --count 1
+```bash
+queuectl enqueue '{"id":"crash-test","command":"powershell -Command \"Start-Sleep -Seconds 20\""}'
+queuectl worker:start --count 1
+```
 
 # once "picked job crash-test" appears, terminate the worker process abruptly
 
-Then:
+**Then:**
 
+```bash
 queuectl worker:start --count 1
 queuectl show crash-test
+```
 
-Expect:
+**Expect:**
 
-On restart, processing job is recovered to pending.
+- On restart, processing job is recovered to pending.
+- Worker picks and completes it.
+- No job stays stuck as processing.
 
-Worker picks and completes it.
+### 8. Graceful Shutdown
 
-No job stays stuck as processing.
-
-8. Graceful Shutdown
-   queuectl enqueue '{"command":"powershell -Command \"Start-Sleep -Seconds 5\""}'
-   queuectl worker:start --count 1
+```bash
+queuectl enqueue '{"command":"powershell -Command \"Start-Sleep -Seconds 5\""}'
+queuectl worker:start --count 1
+```
 
 # during run, press Ctrl + C
 
-Expect:
+**Expect:**
 
-Logs indicate stop requested.
-
-Worker finishes the current job, then exits.
-
-Job is completed.
+- Logs indicate stop requested.
+- Worker finishes the current job, then exits.
+- Job is completed.

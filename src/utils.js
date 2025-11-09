@@ -1,4 +1,3 @@
-// src/utils.js
 const { logError } = require("./logger");
 
 function nowMs() {

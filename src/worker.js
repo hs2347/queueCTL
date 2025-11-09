@@ -1,4 +1,3 @@
-// src/worker.js
 const { spawn } = require("child_process");
 const {
   fetchAndMarkNextJob,

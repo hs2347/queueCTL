@@ -1,4 +1,3 @@
-// src/cli.js
 const { Command } = require("commander");
 const { initDb } = require("./db");
 const {

@@ -1,4 +1,3 @@
-// src/logger.js
 function logInfo(...args) {
   console.log("[INFO]", ...args);
 }

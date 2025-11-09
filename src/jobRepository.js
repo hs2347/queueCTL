@@ -1,4 +1,3 @@
-// src/jobRepository.js
 const { v4: uuidv4 } = require("uuid");
 const { withDataLocked, readData } = require("./db");
 const { nowMs } = require("./utils");
@@ -43,7 +42,6 @@ function listJobs({ state } = {}) {
     }
     jobs = jobs.filter((j) => j.state === state);
   }
-  // newest first
   jobs.sort((a, b) => b.created_at - a.created_at);
   return jobs.slice(0, 200);
 }
